@@ -73,11 +73,6 @@ jobs:
           cp ansible/inventory_template.ini ansible/inventory.ini
           sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" ansible/inventory.ini
 
-      - name: Debug Information
-        run: |
-          cat inventory.ini
-          echo "Public IP: ${{ env.PUBLIC_IP }}"
-
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
