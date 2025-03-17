@@ -51,7 +51,7 @@
       docker_container:
         name: react_app_container
         state: absent
-        force: yes
+        force_kill: true
 
     - name: Run React app container
       docker_container:
