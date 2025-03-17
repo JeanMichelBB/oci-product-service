@@ -1,5 +1,7 @@
 - name: Deploy React App to OCI
   hosts: oci
+  become: true
+
   tasks:
     - name: Update package lists
       apt:
