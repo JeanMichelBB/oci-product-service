@@ -81,4 +81,4 @@ jobs:
           ssh-keyscan -H "${{ env.PUBLIC_IP }}" >> ~/.ssh/known_hosts
 
       - name: Run Ansible Playbook
-        run: ansible-playbook -i ansible/inventory.init ansible/playbook.yml
+        run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
