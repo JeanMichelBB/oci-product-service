@@ -59,15 +59,14 @@ jobs:
           PUBLIC_IP=$(oci compute instance list --compartment-id ${{ secrets.OCI_COMPARTMENT_ID }} --sort-by TIMECREATED --all --query "data[0].id" --raw-output | xargs -I {} oci compute instance list-vnics --instance-id {} --query "data[0].\"public-ip\"" --raw-output)
           echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
 
-      - uses: rez0n/create-dns-record@v2.1
-        with:
-          type: "A"
-          name: "oci.sacenpapier.org"
-          content: ${{ env.PUBLIC_IP }}
-          ttl: 1
-          proxied: true
-          token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          zone: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      - name: Update Cloudflare DNS Record
+        run: |
+          curl -X PUT "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/dns_records/<RECORD_ID>" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "{\"type\":\"A\",\"name\":\"oci.sacenpapier.org\",\"content\":\"${{ env.PUBLIC_IP }}\",\"ttl\":120,\"proxied\":false}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Install Ansible
         run: |
