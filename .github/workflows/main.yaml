@@ -70,8 +70,8 @@ jobs:
             echo "Error: PUBLIC_IP is empty"
             exit 1
           fi
-          cp ansible/inventory_template.ini inventory.ini
-          sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" inventory.ini
+          cp ansible/inventory_template.ini ansible/inventory.ini
+          sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" ansible/inventory.ini
 
       - name: Debug Information
         run: |
@@ -86,4 +86,4 @@ jobs:
           ssh-keyscan -H "${{ env.PUBLIC_IP }}" >> ~/.ssh/known_hosts
 
       - name: Run Ansible Playbook
-        run: ansible-playbook -i inventory.ini playbook.yml
+        run: ansible-playbook -i ansible/inventory. ansible/playbook.yml
