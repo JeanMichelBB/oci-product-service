@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  build-push-docker:
+  Ansible:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -70,7 +70,7 @@ jobs:
             echo "Error: PUBLIC_IP is empty"
             exit 1
           fi
-          cp inventory_template.ini inventory.ini
+          cp ansible/inventory_template.ini inventory.ini
           sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" inventory.ini
 
       - name: Debug Information
