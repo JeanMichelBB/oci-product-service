@@ -1,0 +1,89 @@
+name: Deploy React App to OCI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-push-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up OCI CLI
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: "oci -v"
+
+      - name: Configure OCI CLI
+        env:
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_KEY_FINGERPRINT: ${{ secrets.OCI_KEY_FINGERPRINT }}
+          OCI_INSTANCE_ID: ${{ secrets.OCI_INSTANCE_ID }}
+        run: |
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${OCI_USER_OCID}" >> ~/.oci/config
+          echo "fingerprint=${OCI_KEY_FINGERPRINT}" >> ~/.oci/config
+          echo "tenancy=${OCI_TENANCY_OCID}" >> ~/.oci/config
+          echo "region=${OCI_REGION}" >> ~/.oci/config
+          echo "${OCI_PRIVATE_KEY}" > ~/.oci/oci_private_key.pem
+          chmod 600 ~/.oci/oci_private_key.pem
+          echo "key_file=~/.oci/oci_private_key.pem" >> ~/.oci/config
+          chmod 600 ~/.oci/config
+          echo "Config file created at ~/.oci/config"
+
+      - name: Check if the instance is running
+        run: |
+          instance_state=$(oci compute instance list \
+          --compartment-id  ${{ secrets.OCI_COMPARTMENT_ID }} \
+          --query "data[?\"lifecycle-state\"=='RUNNING'] | sort_by(@, &\"time-created\") | [-1].\"lifecycle-state\"" \
+          --output json | jq -r '.')
+
+          while [ "$instance_state" != "RUNNING" ]; do
+          sleep 10
+          
+          instance_state=$(oci compute instance list \
+              --compartment-id  ${{ secrets.OCI_COMPARTMENT_ID }} \
+              --query "data[?\"lifecycle-state\"=='RUNNING'] | sort_by(@, &\"time-created\") | [-1].\"lifecycle-state\"" \
+              --output json | jq -r '.')
+          done
+
+      - name: Get the public IP of the instance
+        run: |
+          PUBLIC_IP=$(oci compute instance list --compartment-id ${{ secrets.OCI_COMPARTMENT_ID }} --sort-by TIMECREATED --all --query "data[0].id" --raw-output | xargs -I {} oci compute instance list-vnics --instance-id {} --query "data[0].\"public-ip\"" --raw-output)
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      - name: Create Ansible Inventory
+        run: |
+          if [ -z "${{ env.PUBLIC_IP }}" ]; then
+            echo "Error: PUBLIC_IP is empty"
+            exit 1
+          fi
+          cp inventory_template.ini inventory.ini
+          sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" inventory.ini
+
+      - name: Debug Information
+        run: |
+          cat inventory.ini
+          echo "Public IP: ${{ env.PUBLIC_IP }}"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "${{ env.PUBLIC_IP }}" >> ~/.ssh/known_hosts
+
+      - name: Run Ansible Playbook
+        run: ansible-playbook -i inventory.ini playbook.yml
