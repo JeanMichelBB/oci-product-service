@@ -1,0 +1,17 @@
+- name: Deploy React App to OCI
+  hosts: oci
+  tasks:
+    - name: Update package lists
+      apt:
+        update_cache: yes
+
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: present
+
+    - name: Pull latest Docker image
+      command: docker pull jeanmichelbb/oci-react:latest
+
+    - name: Restart React app container
+      command: docker run --pull always -d -p 80:80 jeanmichelbb/oci-react:latest
