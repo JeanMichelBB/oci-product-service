@@ -6,10 +6,30 @@
     - name: Update package lists
       apt:
         update_cache: yes
-
+    - name: Install Docker dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+    
+    - name: Add Docker GPG key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+    
+    - name: Add Docker repository
+      shell: echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
     - name: Install Node.js
       apt:
         name: nodejs
+        state: present
+
+    - name: Install docker
+      apt:
+        name: docker
         state: present
 
     - name: Pull latest Docker image
