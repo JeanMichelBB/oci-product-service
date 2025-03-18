@@ -1,4 +1,3 @@
----
 - name: Deploy React App to OCI
   hosts: oci
   become: true
@@ -34,7 +33,7 @@
         name: docker
         state: started
         enabled: yes
-    
+
     - name: Verify Docker installation
       command: docker --version
       register: docker_version
@@ -64,3 +63,32 @@
         published_ports:
           - "80:80"
         detach: yes
+
+    - name: Create systemd service for soft restart
+      copy:
+        dest: /etc/systemd/system/react-app-restart.service
+        content: |
+          [Unit]
+          Description=React App Docker Container
+          After=network.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          ExecStartPre=-/usr/bin/docker pull jeanmichelbb/oci-react:latest
+          ExecStart=/usr/bin/docker run --rm --name react_app_container -d -p 80:80 jeanmichelbb/oci-react:latest
+          ExecStop=/usr/bin/docker stop react_app_container
+          Exec
+          Restart=always
+          RestartSec=5s
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start systemd service
+      systemd:
+        name: react-app-restart
+        enabled: yes
+        state: started
+
+    - name: Reload systemd configuration
+      command: systemctl daemon-reload
