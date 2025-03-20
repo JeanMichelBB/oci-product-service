@@ -1,14 +1,11 @@
-- name: Deploy React App to OCI
+- name: Deploy Docker Compose App to OCI
   hosts: oci
   become: true
 
   tasks:
-    - name: Update package lists
+    - name: Ensure required packages are installed
       apt:
         update_cache: yes
-    
-    - name: Install Docker dependencies
-      apt:
         name:
           - apt-transport-https
           - ca-certificates
@@ -16,68 +13,79 @@
           - gnupg
           - lsb-release
         state: present
-    
+
     - name: Add Docker GPG key
-      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-    
-    - name: Add Docker repository
-      shell: echo "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    - name: Install Docker
-      apt:
-        name: docker-ce
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
         state: present
-    
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker and Docker Compose
+      apt:
+        name:
+          - docker-ce
+          - docker-compose
+        state: present
+
     - name: Ensure Docker service is started
       service:
         name: docker
         state: started
         enabled: yes
 
-    - name: Verify Docker installation
-      command: docker --version
-      register: docker_version
-      changed_when: false
-      failed_when: docker_version.rc != 0
+    - name: Create app directory
+      file:
+        path: /opt/app
+        state: directory
+        mode: '0755'
 
-    - name: Pull latest Docker image
-      docker_image:
-        name: jeanmichelbb/oci-react
-        source: pull
-        tag: latest
-
-    - name: Remove existing React app container (if exists)
-      docker_container:
-        name: react_app_container
-        state: absent
-        force_kill: true
-
-    - name: Run React app container
-      docker_container:
-        name: react_app_container
-        image: jeanmichelbb/oci-react:latest
-        state: started
-        restart_policy: always
-        exposed_ports:
-          - "80"
-        published_ports:
-          - "80:80"
-        detach: yes
-
-    - name: Create systemd service for soft restart
+    - name: Copy Docker Compose file to instance
       copy:
-        dest: /etc/systemd/system/react-app-restart.service
+        src: ./docker-compose.yml
+        dest: /opt/app/docker-compose.yml
+
+    - name: Copy .env file for secrets
+      copy:
+        src: ./.env
+        dest: /opt/app/.env
+
+    - name: Stop running containers (if any)
+      community.docker.docker_compose:
+        project_src: /opt/app
+        state: absent
+      ignore_errors: true
+
+    - name: Pull latest images
+      community.docker.docker_compose:
+        project_src: /opt/app
+        pull: yes
+
+    - name: Start Docker Compose services
+      community.docker.docker_compose:
+        project_src: /opt/app
+        state: present
+        recreate: always
+
+    - name: Prune unused Docker images
+      command: docker image prune -f
+
+    - name: Create systemd service for Docker Compose
+      copy:
+        dest: /etc/systemd/system/docker-compose-app.service
         content: |
           [Unit]
-          Description=React App Docker Container
+          Description=Docker Compose App
           After=network.target
           StartLimitIntervalSec=0
 
           [Service]
-          ExecStartPre=-/usr/bin/docker pull jeanmichelbb/oci-react:latest
-          ExecStart=/usr/bin/docker run --rm --name react_app_container -d -p 80:80 jeanmichelbb/oci-react:latest
-          ExecStop=/usr/bin/docker stop react_app_container
-          Exec
+          WorkingDirectory=/opt/app
+          ExecStart=/usr/bin/docker compose up -d
+          ExecStop=/usr/bin/docker compose down
           Restart=always
           RestartSec=5s
 
@@ -86,9 +94,9 @@
 
     - name: Enable and start systemd service
       systemd:
-        name: react-app-restart
+        name: docker-compose-app
         enabled: yes
         state: started
-
+        
     - name: Reload systemd configuration
       command: systemctl daemon-reload
