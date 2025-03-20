@@ -45,7 +45,7 @@
 
     - name: Copy Docker Compose file to instance
       copy:
-        src: ../docker-compose.yml
+        src: docker-compose.yml 
         dest: /opt/app/docker-compose.yml
 
     - name: Copy .env file for secrets
