@@ -52,11 +52,11 @@
         remote_src: false
 
 
-    # - name: Copy .env file for secrets
-    #   copy:
-    #     src: ".env"
-    #     dest: /opt/app/.env
-    #     remote_src: false
+    - name: Copy .env file for secrets
+      copy:
+        src: ".env"
+        dest: /opt/app/.env
+        remote_src: false
 
     - name: Stop running containers (if any)
       community.docker.docker_compose_v2:
