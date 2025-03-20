@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  frontend:
+    image: jeanmichelbb/oci-frontend:latest  # Replace with your frontend image
+    ports:
+      - "80:80"
+    environment:
+      - VITE_APP_GOOGLE_CLIENT_ID=${VITE_APP_GOOGLE_CLIENT_ID}
+      - VITE_APP_API_URL=${VITE_APP_API_URL}
+      - VITE_APP_API_KEY=${VITE_APP_API_KEY}
+    depends_on:
+      - backend
+    restart: always
+
+  backend:
+    image: jeanmichelbb/oci-backend:latest  # Replace with your backend image
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+    depends_on:
+      - mysql
+    restart: always
+
+  mysql:
+    image: mysql:8
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: always
+
+volumes:
+  db_data:
