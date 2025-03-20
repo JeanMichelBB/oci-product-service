@@ -1,4 +1,3 @@
-
 - name: Deploy Docker Compose App to OCI
   hosts: oci
   become: true
@@ -98,6 +97,6 @@
         name: docker-compose-app
         enabled: yes
         state: started
-
+        
     - name: Reload systemd configuration
       command: systemctl daemon-reload
