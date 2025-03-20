@@ -54,18 +54,18 @@
         dest: /opt/app/.env
 
     - name: Stop running containers (if any)
-      community.docker.docker_compose:
+      community.docker.docker_compose_v2:
         project_src: /opt/app
         state: absent
       ignore_errors: true
 
     - name: Pull latest images
-      community.docker.docker_compose:
+      community.docker.docker_compose_v2:
         project_src: /opt/app
         pull: yes
 
     - name: Start Docker Compose services
-      community.docker.docker_compose:
+      community.docker.docker_compose_v2:
         project_src: /opt/app
         state: present
         recreate: always
