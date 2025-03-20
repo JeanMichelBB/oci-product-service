@@ -28,7 +28,9 @@
       apt:
         name:
           - docker-ce
-          - docker-compose
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
         state: present
 
     - name: Ensure Docker service is started
@@ -45,12 +47,12 @@
 
     - name: Copy Docker Compose file to instance
       copy:
-        src: docker-compose.yml 
+        src: "{{ playbook_dir }}/docker-compose.yml"
         dest: /opt/app/docker-compose.yml
 
     - name: Copy .env file for secrets
       copy:
-        src: ./.env
+        src: "{{ playbook_dir }}/.env"
         dest: /opt/app/.env
 
     - name: Stop running containers (if any)
