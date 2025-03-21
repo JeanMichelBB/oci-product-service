@@ -38,24 +38,29 @@
         state: started
         enabled: yes
 
-    - name: Create Docker network
-      command: docker network create my_network
-      ignore_errors: true  # Ignore if the network already exists
+    - name: Ensure my_network exists
+      docker_network:
+        name: my_network
+        state: present
 
     - name: Remove old MySQL container (if exists)
       command: docker rm -f mysql
       ignore_errors: true
 
     - name: Run MySQL container
-      command: >
-        docker run -d --name mysql
-        --network my_network
-        -e MYSQL_ROOT_PASSWORD=sysadmsysadm
-        -e MYSQL_DATABASE=chatbox_db
-        -e MYSQL_USER=user
-        -e MYSQL_PASSWORD=sysadm
-        -v db_data:/var/lib/mysql
-        mysql:8
+      docker_container:
+        name: mysql
+        image: mysql:8
+        restart_policy: always
+        networks:
+          - name: my_network
+        env:
+          MYSQL_ROOT_PASSWORD: sysadmsysadm
+          MYSQL_DATABASE: chatbox_db
+          MYSQL_USER: user
+          MYSQL_PASSWORD: sysadm
+        volumes:
+          - db_data:/var/lib/mysql
 
     - name: Create systemd service for Backend and Frontend
       copy:
@@ -63,9 +68,8 @@
         content: |
           [Unit]
           Description=Chatbox Backend & Frontend Service
-          After=network.target mysql.service
-          Requires=mysql.service
-
+          After=network.target
+          
           [Service]
           Type=oneshot
           RemainAfterExit=yes
@@ -86,12 +90,6 @@
 
     - name: Reload systemd daemon
       command: systemctl daemon-reload
-
-    - name: Enable and start MySQL service
-      systemd:
-        name: mysql
-        enabled: yes
-        state: started
 
     - name: Enable and start Chatbox service
       systemd:
