@@ -68,11 +68,12 @@
         content: |
           [Unit]
           Description=Chatbox Backend & Frontend Service
-          After=network.target
-          
+          After=network.target docker.service
+          Requires=docker.service
+
           [Service]
-          Type=oneshot
-          RemainAfterExit=yes
+          Type=simple
+          Restart=always
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
           ExecStart=/bin/bash -c "
@@ -83,7 +84,6 @@
           ExecStop=/bin/bash -c "
             docker stop frontend backend
           "
-          Restart=always
 
           [Install]
           WantedBy=multi-user.target

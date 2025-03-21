@@ -97,10 +97,6 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "${{ env.PUBLIC_IP }}" >> ~/.ssh/known_hosts
-
-      - name: Create .env file
-        run: |
-          echo "${{ secrets.ENV_FILE }}" > ansible/.env
-
+          
       - name: Run Ansible Playbook
         run: ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
