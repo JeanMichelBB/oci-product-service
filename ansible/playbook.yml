@@ -57,74 +57,28 @@
         -v db_data:/var/lib/mysql
         mysql:8
 
-    - name: Remove old Backend container (if exists)
-      command: docker rm -f backend
-      ignore_errors: true
-
-    - name: Run Backend container
-      command: >
-        docker run -d --name backend
-        --network my_network
-        -p 8000:8000
-        jeanmichelbb/oci-backend:latest
-
-    - name: Remove old Frontend container (if exists)
-      command: docker rm -f frontend
-      ignore_errors: true
-
-    - name: Run Frontend container
-      command: >
-        docker run -d --name frontend
-        --network my_network
-        -p 80:80
-        jeanmichelbb/oci-frontend:latest
-
-    - name: Prune unused Docker images
-      command: docker image prune -f
-
-    - name: Create systemd service for Backend
+    - name: Create systemd service for Backend and Frontend
       copy:
-        dest: /etc/systemd/system/backend.service
+        dest: /etc/systemd/system/chatbox.service
         content: |
           [Unit]
-          Description=Backend Service
-          After=network.target
+          Description=Chatbox Backend & Frontend Service
+          After=network.target mysql.service
+          Requires=mysql.service
 
           [Service]
-          ExecStart=/usr/bin/docker start -a backend
-          ExecStop=/usr/bin/docker stop backend
-          Restart=always
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Create systemd service for Frontend
-      copy:
-        dest: /etc/systemd/system/frontend.service
-        content: |
-          [Unit]
-          Description=Frontend Service
-          After=network.target
-
-          [Service]
-          ExecStart=/usr/bin/docker start -a frontend
-          ExecStop=/usr/bin/docker stop frontend
-          Restart=always
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Create systemd service for MySQL
-      copy:
-        dest: /etc/systemd/system/mysql.service
-        content: |
-          [Unit]
-          Description=MySQL Service
-          After=network.target
-
-          [Service]
-          ExecStart=/usr/bin/docker start -a mysql
-          ExecStop=/usr/bin/docker stop mysql
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
+          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
+          ExecStart=/bin/bash -c "
+            docker rm -f backend frontend || true &&
+            docker run -d --name backend --network my_network -p 8000:8000 jeanmichelbb/oci-backend:latest &&
+            docker run -d --name frontend --network my_network -p 80:80 jeanmichelbb/oci-frontend:latest
+          "
+          ExecStop=/bin/bash -c "
+            docker stop frontend backend
+          "
           Restart=always
 
           [Install]
@@ -139,14 +93,8 @@
         enabled: yes
         state: started
 
-    - name: Enable and start Backend service
+    - name: Enable and start Chatbox service
       systemd:
-        name: backend
-        enabled: yes
-        state: started
-
-    - name: Enable and start Frontend service
-      systemd:
-        name: frontend
+        name: chatbox
         enabled: yes
         state: started
