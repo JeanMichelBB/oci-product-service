@@ -1,4 +1,4 @@
-- name: Deploy Docker Compose App to OCI
+- name: Deploy Docker Containers to OCI
   hosts: oci
   become: true
 
@@ -24,13 +24,12 @@
         repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
 
-    - name: Install Docker and Docker Compose
+    - name: Install Docker
       apt:
         name:
           - docker-ce
           - docker-ce-cli
           - containerd.io
-          - docker-compose-plugin
         state: present
 
     - name: Ensure Docker service is started
@@ -39,69 +38,115 @@
         state: started
         enabled: yes
 
-    - name: Create app directory
-      file:
-        path: /opt/app
-        state: directory
-        mode: '0755'
+    - name: Create Docker network
+      command: docker network create my_network
+      ignore_errors: true  # Ignore if the network already exists
 
-    - name: Copy Docker Compose file to instance
-      copy:
-        src: "docker-compose.yml"
-        dest: /opt/app/docker-compose.yml
-        remote_src: false
-
-
-    - name: Copy .env file for secrets
-      copy:
-        src: ".env"
-        dest: /opt/app/.env
-        remote_src: false
-
-    - name: Stop running containers (if any)
-      community.docker.docker_compose_v2:
-        project_src: /opt/app
-        state: absent
+    - name: Remove old MySQL container (if exists)
+      command: docker rm -f mysql
       ignore_errors: true
 
-    - name: Pull latest images
-      community.docker.docker_compose_v2:
-        project_src: /opt/app
-        pull: always
+    - name: Run MySQL container
+      command: >
+        docker run -d --name mysql
+        --network my_network
+        -e MYSQL_ROOT_PASSWORD=sysadmsysadm
+        -e MYSQL_DATABASE=chatbox_db
+        -e MYSQL_USER=user
+        -e MYSQL_PASSWORD=sysadm
+        -v db_data:/var/lib/mysql
+        mysql:8
 
-    - name: Start Docker Compose services
-      community.docker.docker_compose_v2:
-        project_src: /opt/app
-        state: present
-        recreate: always
+    - name: Remove old Backend container (if exists)
+      command: docker rm -f backend
+      ignore_errors: true
+
+    - name: Run Backend container
+      command: >
+        docker run -d --name backend
+        --network my_network
+        -p 8000:8000
+        jeanmichelbb/oci-backend:latest
+
+    - name: Remove old Frontend container (if exists)
+      command: docker rm -f frontend
+      ignore_errors: true
+
+    - name: Run Frontend container
+      command: >
+        docker run -d --name frontend
+        --network my_network
+        -p 80:80
+        jeanmichelbb/oci-frontend:latest
 
     - name: Prune unused Docker images
       command: docker image prune -f
 
-    - name: Create systemd service for Docker Compose
+    - name: Create systemd service for Backend
       copy:
-        dest: /etc/systemd/system/docker-compose-app.service
+        dest: /etc/systemd/system/backend.service
         content: |
           [Unit]
-          Description=Docker Compose App
+          Description=Backend Service
           After=network.target
-          StartLimitIntervalSec=0
 
           [Service]
-          WorkingDirectory=/opt/app
-          ExecStart=/usr/bin/docker compose up -d
-          ExecStop=/usr/bin/docker compose down
+          ExecStart=/usr/bin/docker start -a backend
+          ExecStop=/usr/bin/docker stop backend
           Restart=always
-          RestartSec=5s
 
           [Install]
           WantedBy=multi-user.target
 
-    - name: Enable and start systemd service
+    - name: Create systemd service for Frontend
+      copy:
+        dest: /etc/systemd/system/frontend.service
+        content: |
+          [Unit]
+          Description=Frontend Service
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/docker start -a frontend
+          ExecStop=/usr/bin/docker stop frontend
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create systemd service for MySQL
+      copy:
+        dest: /etc/systemd/system/mysql.service
+        content: |
+          [Unit]
+          Description=MySQL Service
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/docker start -a mysql
+          ExecStop=/usr/bin/docker stop mysql
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon
+      command: systemctl daemon-reload
+
+    - name: Enable and start MySQL service
       systemd:
-        name: docker-compose-app
+        name: mysql
         enabled: yes
         state: started
-        
-    - name: Reload systemd configuration
-      command: systemctl daemon-reload
+
+    - name: Enable and start Backend service
+      systemd:
+        name: backend
+        enabled: yes
+        state: started
+
+    - name: Enable and start Frontend service
+      systemd:
+        name: frontend
+        enabled: yes
+        state: started
