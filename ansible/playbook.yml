@@ -67,27 +67,26 @@
           ExecStartPre=/usr/bin/docker pull mysql:8
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
-          ExecStart=/bin/bash -c '
-            /usr/bin/docker run -d --restart unless-stopped --name mysql \
-              --network my_network \
-              -e MYSQL_ROOT_PASSWORD=sysadmsysadm \
-              -e MYSQL_DATABASE=chatbox_db \
-              -e MYSQL_USER=user \
-              -e MYSQL_PASSWORD=sysadm \
-              -v db_data:/var/lib/mysql \
-              mysql:8
-            
-            /usr/bin/docker run -d --restart unless-stopped --name backend \
-              --network my_network \
-              -p 8000:8000 \
-              --env-file /opt/chatbox/.env \
-              jeanmichelbb/oci-backend:latest
-            
-            /usr/bin/docker run -d --restart unless-stopped --name frontend \
-              --network my_network \
-              -p 80:80 \
-              jeanmichelbb/oci-frontend:latest
-          '
+          
+          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name mysql \
+            --network my_network \
+            -e MYSQL_ROOT_PASSWORD=sysadmsysadm \
+            -e MYSQL_DATABASE=chatbox_db \
+            -e MYSQL_USER=user \
+            -e MYSQL_PASSWORD=sysadm \
+            -v db_data:/var/lib/mysql \
+            mysql:8
+          
+          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name backend \
+            --network my_network \
+            -p 8000:8000 \
+            --env-file /opt/chatbox/.env \
+            jeanmichelbb/oci-backend:latest
+          
+          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name frontend \
+            --network my_network \
+            -p 80:80 \
+            jeanmichelbb/oci-frontend:latest
 
           [Install]
           WantedBy=multi-user.target
