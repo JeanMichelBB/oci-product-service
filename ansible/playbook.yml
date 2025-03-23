@@ -1,6 +1,6 @@
 - name: Deploy Chatbox Docker Containers to OCI
   hosts: oci
-  become: true
+  become: true # Run as root
 
   tasks:
     - name: Add Docker GPG key
