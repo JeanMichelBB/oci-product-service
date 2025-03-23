@@ -125,6 +125,7 @@
           ExecStart=/usr/bin/docker run -d --name frontend \
             --network my_network \
             -p 80:80 \
+            --env-file /opt/chatbox/.env \
             jeanmichelbb/oci-frontend:latest
 
           [Install]
