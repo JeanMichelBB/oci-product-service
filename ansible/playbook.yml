@@ -49,25 +49,26 @@
         group: ubuntu
         mode: "0644"
 
-    - name: Create systemd service for Chatbox containers
+    - name: Create Docker network
+      command: docker network create my_network || true
+
+    - name: Create Docker volume
+      command: docker volume create db_data || true
+
+    - name: Create systemd service for MySQL
       copy:
-        dest: /etc/systemd/system/chatbox.service
+        dest: /etc/systemd/system/chatbox-mysql.service
         content: |
           [Unit]
-          Description=Chatbox Docker Containers
+          Description=Chatbox MySQL Container
           After=network.target docker.service
           Requires=docker.service
 
           [Service]
           Restart=always
-          ExecStartPre=-/usr/bin/docker stop backend frontend mysql
-          ExecStartPre=-/usr/bin/docker rm backend frontend mysql
-          ExecStartPre=-/usr/bin/docker network create my_network || true
-          ExecStartPre=-/usr/bin/docker volume create db_data || true
+          ExecStartPre=-/usr/bin/docker stop mysql
+          ExecStartPre=-/usr/bin/docker rm mysql
           ExecStartPre=/usr/bin/docker pull mysql:8
-          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
-          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
-          
           ExecStart=/usr/bin/docker run -d --restart unless-stopped --name mysql \
             --network my_network \
             -e MYSQL_ROOT_PASSWORD=sysadmsysadm \
@@ -76,13 +77,47 @@
             -e MYSQL_PASSWORD=sysadm \
             -v db_data:/var/lib/mysql \
             mysql:8
-          
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create systemd service for Backend
+      copy:
+        dest: /etc/systemd/system/chatbox-backend.service
+        content: |
+          [Unit]
+          Description=Chatbox Backend Container
+          After=chatbox-mysql.service
+          Requires=chatbox-mysql.service
+
+          [Service]
+          Restart=always
+          ExecStartPre=-/usr/bin/docker stop backend
+          ExecStartPre=-/usr/bin/docker rm backend
+          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
           ExecStart=/usr/bin/docker run -d --restart unless-stopped --name backend \
             --network my_network \
             -p 8000:8000 \
             --env-file /opt/chatbox/.env \
             jeanmichelbb/oci-backend:latest
-          
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Create systemd service for Frontend
+      copy:
+        dest: /etc/systemd/system/chatbox-frontend.service
+        content: |
+          [Unit]
+          Description=Chatbox Frontend Container
+          After=chatbox-backend.service
+          Requires=chatbox-backend.service
+
+          [Service]
+          Restart=always
+          ExecStartPre=-/usr/bin/docker stop frontend
+          ExecStartPre=-/usr/bin/docker rm frontend
+          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
           ExecStart=/usr/bin/docker run -d --restart unless-stopped --name frontend \
             --network my_network \
             -p 80:80 \
@@ -95,8 +130,38 @@
       systemd:
         daemon_reload: yes
 
-    - name: Enable and start Chatbox service
+    - name: Enable and start MySQL service
       systemd:
-        name: chatbox
+        name: chatbox-mysql
         enabled: yes
         state: started
+      
+    - name: Enable and start Backend service
+      systemd:
+        name: chatbox-backend
+        enabled: yes
+        state: started
+
+    - name: Enable and start Frontend service
+      systemd:
+        name: chatbox-frontend
+        enabled: yes
+        state: started
+
+    - name: Wait for services to start
+      wait_for:
+        port: 80
+        delay: 10
+        timeout: 300
+
+    - name: Check if services are running
+      shell: |
+        systemctl is-active --quiet chatbox-mysql
+        systemctl is-active --quiet chatbox-backend
+        systemctl is-active --quiet chatbox-frontend
+      register: services_running
+
+    - name: Notify if services are not running
+      debug:
+        msg: "One or more services are not running"
+      when: services_running.rc != 0
