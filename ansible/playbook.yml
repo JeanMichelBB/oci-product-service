@@ -49,11 +49,15 @@
         group: ubuntu
         mode: "0644"
 
-    - name: Create Docker network
-      command: docker network create my_network || true
+    - name: Ensure Docker network exists
+      docker_network:
+        name: my_network
+        state: present
 
-    - name: Create Docker volume
-      command: docker volume create db_data || true
+    - name: Ensure Docker volume exists
+      docker_volume:
+        name: db_data
+        state: present
 
     - name: Create systemd service for MySQL
       copy:
@@ -65,11 +69,11 @@
           Requires=docker.service
 
           [Service]
-          Restart=always
+          Restart=on-failure
           ExecStartPre=-/usr/bin/docker stop mysql
           ExecStartPre=-/usr/bin/docker rm mysql
           ExecStartPre=/usr/bin/docker pull mysql:8
-          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name mysql \
+          ExecStart=/usr/bin/docker run -d --name mysql \
             --network my_network \
             -e MYSQL_ROOT_PASSWORD=sysadmsysadm \
             -e MYSQL_DATABASE=chatbox_db \
@@ -91,11 +95,11 @@
           Requires=chatbox-mysql.service
 
           [Service]
-          Restart=always
+          Restart=on-failure
           ExecStartPre=-/usr/bin/docker stop backend
           ExecStartPre=-/usr/bin/docker rm backend
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
-          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name backend \
+          ExecStart=/usr/bin/docker run -d --name backend \
             --network my_network \
             -p 8000:8000 \
             --env-file /opt/chatbox/.env \
@@ -114,11 +118,11 @@
           Requires=chatbox-backend.service
 
           [Service]
-          Restart=always
+          Restart=on-failure
           ExecStartPre=-/usr/bin/docker stop frontend
           ExecStartPre=-/usr/bin/docker rm frontend
           ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
-          ExecStart=/usr/bin/docker run -d --restart unless-stopped --name frontend \
+          ExecStart=/usr/bin/docker run -d --name frontend \
             --network my_network \
             -p 80:80 \
             jeanmichelbb/oci-frontend:latest
@@ -147,21 +151,3 @@
         name: chatbox-frontend
         enabled: yes
         state: started
-
-    - name: Wait for services to start
-      wait_for:
-        port: 80
-        delay: 10
-        timeout: 300
-
-    - name: Check if services are running
-      shell: |
-        systemctl is-active --quiet chatbox-mysql
-        systemctl is-active --quiet chatbox-backend
-        systemctl is-active --quiet chatbox-frontend
-      register: services_running
-
-    - name: Notify if services are not running
-      debug:
-        msg: "One or more services are not running"
-      when: services_running.rc != 0
