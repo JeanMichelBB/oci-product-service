@@ -1,6 +1,6 @@
 - name: Deploy Chatbox Docker Containers to OCI
   hosts: oci
-  become: true # Run as root
+  become: true  # Run as root
 
   tasks:
     - name: Add Docker GPG key
@@ -12,7 +12,7 @@
       apt_repository:
         repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
-        
+
     - name: Ensure Docker is installed
       apt:
         update_cache: yes
@@ -59,111 +59,44 @@
         name: db_data
         state: present
 
-    - name: Create systemd service for MySQL
-      copy:
-        dest: /etc/systemd/system/chatbox-mysql.service
-        content: |
-          [Unit]
-          Description=Chatbox MySQL Container
-          After=network.target docker.service
-          Requires=docker.service
+    - name: "Launch MySQL container"
+      docker_container:
+        name: mysql
+        image: mysql:8
+        restart_policy: always
+        env:
+          MYSQL_ROOT_PASSWORD: "sysadmsysadm"
+          MYSQL_DATABASE: "chatbox_db"
+          MYSQL_USER: "user"
+          MYSQL_PASSWORD: "sysadm"
+        volumes:
+          - db_data:/var/lib/mysql:rw
+        networks:
+          - name: my_network
+        memory: "512m"
+        cpus: "0.5"
 
-          [Service]
-          Restart=always
-          ExecStartPre=-/usr/bin/docker stop mysql
-          ExecStartPre=-/usr/bin/docker rm mysql
-          ExecStartPre=/usr/bin/docker pull mysql:8
-          ExecStart=/usr/bin/docker run -d --name mysql \
-            --network my_network \
-            -e MYSQL_ROOT_PASSWORD=sysadmsysadm \
-            -e MYSQL_DATABASE=chatbox_db \
-            -e MYSQL_USER=user \
-            -e MYSQL_PASSWORD=sysadm \
-            -v db_data:/var/lib/mysql \
-            --memory=512m \
-            --cpus="0.5" \ 
-            mysql:8
+    - name: "Launch Backend container"
+      docker_container:
+        name: backend
+        image: jeanmichelbb/oci-backend:latest
+        restart_policy: always
+        env_file: /opt/chatbox/.env
+        ports:
+          - "8000:8000"
+        networks:
+          - name: my_network
+        memory: "256m"
+        cpus: "0.3"
 
-            MemoryMax=512M
-            CPUQuota=50%
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Create systemd service for Backend
-      copy:
-        dest: /etc/systemd/system/chatbox-backend.service
-        content: |
-          [Unit]
-          Description=Chatbox Backend Container
-          After=chatbox-mysql.service
-          Requires=chatbox-mysql.service
-
-          [Service]
-          Restart=always
-          ExecStartPre=-/usr/bin/docker stop backend
-          ExecStartPre=-/usr/bin/docker rm backend
-          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-backend:latest
-          ExecStart=/usr/bin/docker run -d --name backend \
-            --network my_network \
-            -p 8000:8000 \
-            --env-file /opt/chatbox/.env \
-            --memory=256m \  # Limit to 256MB RAM
-            --cpus="0.3" \
-            jeanmichelbb/oci-backend:latest
-
-          MemoryMax=256M
-          CPUQuota=30%
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Create systemd service for Frontend
-      copy:
-        dest: /etc/systemd/system/chatbox-frontend.service
-        content: |
-          [Unit]
-          Description=Chatbox Frontend Container
-          After=chatbox-backend.service
-          Requires=chatbox-backend.service
-
-          [Service]
-          Restart=always
-          ExecStartPre=-/usr/bin/docker stop frontend
-          ExecStartPre=-/usr/bin/docker rm frontend
-          ExecStartPre=/usr/bin/docker pull jeanmichelbb/oci-frontend:latest
-          ExecStart=/usr/bin/docker run -d --name frontend \
-            --network my_network \
-            -p 80:80 \
-            --env-file /opt/chatbox/.env \
-            --memory=128m \   # Limit to 128MB RAM
-            --cpus="0.2" \
-            jeanmichelbb/oci-frontend:latest
-
-          MemoryMax=128M
-          CPUQuota=20%
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Reload systemd daemon
-      systemd:
-        daemon_reload: yes
-
-    - name: Enable and start MySQL service
-      systemd:
-        name: chatbox-mysql
-        enabled: yes
-        state: started
-      
-    - name: Enable and start Backend service
-      systemd:
-        name: chatbox-backend
-        enabled: yes
-        state: started
-
-    - name: Enable and start Frontend service
-      systemd:
-        name: chatbox-frontend
-        enabled: yes
-        state: started
+    - name: "Launch Frontend container"
+      docker_container:
+        name: frontend
+        image: jeanmichelbb/oci-frontend:latest
+        restart_policy: always
+        ports:
+          - "80:80"
+        networks:
+          - name: my_network
+        memory: "128m"
+        cpus: "0.2"
