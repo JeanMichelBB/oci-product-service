@@ -12,6 +12,21 @@
       apt_repository:
         repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
+    
+    - name: Stop and remove mysql container if running
+      docker_container:
+        name: mysql
+        state: absent
+
+    - name: Stop and remove frontend container if running
+      docker_container:
+        name: frontend
+        state: absent
+
+    - name: Stop and remove backend container if running
+      docker_container:
+        name: backend
+        state: absent
 
     - name: Ensure Docker is installed
       apt:
@@ -32,21 +47,6 @@
         name: docker
         state: started
         enabled: yes
-    
-    - name: Stop and remove mysql container if running
-      docker_container:
-        name: mysql
-        state: absent
-
-    - name: Stop and remove frontend container if running
-      docker_container:
-        name: frontend
-        state: absent
-
-    - name: Stop and remove backend container if running
-      docker_container:
-        name: backend
-        state: absent
 
     - name: Ensure target directory exists
       file:
