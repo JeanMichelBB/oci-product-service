@@ -32,6 +32,21 @@
         name: docker
         state: started
         enabled: yes
+    
+    - name: Stop and remove mysql container if running
+      docker_container:
+        name: mysql
+        state: absent
+
+    - name: Stop and remove frontend container if running
+      docker_container:
+        name: frontend
+        state: absent
+
+    - name: Stop and remove backend container if running
+      docker_container:
+        name: backend
+        state: absent
 
     - name: Ensure target directory exists
       file:
@@ -76,10 +91,11 @@
         memory: "512m"
         cpus: "0.5"
 
-    - name: "Launch Backend container"
+    - name: "Launch Backend container with latest image"
       docker_container:
         name: backend
         image: jeanmichelbb/oci-backend:latest
+        pull: always
         restart_policy: always
         env_file: /opt/chatbox/.env
         ports:
@@ -89,10 +105,11 @@
         memory: "256m"
         cpus: "0.3"
 
-    - name: "Launch Frontend container"
+    - name: "Launch Frontend container with latest image"
       docker_container:
         name: frontend
         image: jeanmichelbb/oci-frontend:latest
+        pull: always
         restart_policy: always
         ports:
           - "80:80"
@@ -100,3 +117,11 @@
           - name: my_network
         memory: "128m"
         cpus: "0.2"
+
+    - name: create service docker-update.service
+      template:
+        src: ansible/docker-update.service.j2
+        dest: /etc/systemd/system/docker-update.service
+        owner: root
+        group: root
+        mode: '0644'
