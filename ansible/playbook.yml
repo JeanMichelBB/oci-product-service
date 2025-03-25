@@ -120,8 +120,18 @@
 
     - name: create service docker-update.service
       template:
-        src: .docker-update.service.j2
+        src: templates/docker-update.service.j2
         dest: /etc/systemd/system/docker-update.service
         owner: root
         group: root
         mode: '0644'
+
+    - name: reload systemd to recognize the new service
+      systemd:
+        daemon_reload: yes
+
+    - name: start docker-update service
+      systemd:
+        name: docker-update.service
+        state: started
+        enabled: yes
