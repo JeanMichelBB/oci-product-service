@@ -88,7 +88,7 @@
           - db_data:/var/lib/mysql:rw
         networks:
           - name: my_network
-        memory: "512m"
+        memory: "256m"
         cpus: "0.5"
 
     - name: "Launch Backend container with latest image"
@@ -102,7 +102,7 @@
           - "8000:8000"
         networks:
           - name: my_network
-        memory: "256m"
+        memory: "128m"
         cpus: "0.3"
 
     - name: "Launch Frontend container with latest image"
@@ -115,7 +115,7 @@
           - "80:80"
         networks:
           - name: my_network
-        memory: "128m"
+        memory: "64m"
         cpus: "0.2"
 
     - name: create service docker-update.service
@@ -123,12 +123,12 @@
         src: templates/docker-update.service.j2
         dest: /etc/systemd/system/docker-update.service
         owner: root
-        group: root
+        group: root        
         mode: '0644'
 
     - name: reload systemd to recognize the new service
       systemd:
-        daemon_reload: yes
+        daemon_reload: yes 
 
     - name: start docker-update service
       systemd:
