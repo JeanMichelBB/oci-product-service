@@ -88,7 +88,7 @@
           - db_data:/var/lib/mysql:rw
         networks:
           - name: my_network
-        memory: "256m"
+        memory: "512m"
         cpus: "0.5"
 
     - name: "Launch Backend container with latest image"
