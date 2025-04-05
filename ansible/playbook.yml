@@ -28,7 +28,7 @@
         name: backend
         state: absent
 
-    - name: Ensure Docker is installed
+    - name: Ensure Docker and cron are installed
       apt:
         update_cache: yes
         name:
@@ -40,6 +40,7 @@
           - docker-ce
           - docker-ce-cli
           - containerd.io
+          - cron
         state: present
 
     - name: Ensure Docker service is started
@@ -135,3 +136,13 @@
         name: docker-update.service
         state: started
         enabled: yes
+
+    - name: Schedule instance reboot at 8 AM and 5 PM daily
+      cron:
+        name: "Reboot instance twice daily"
+        minute: "0"
+        hour: 
+          - "8"
+          - "17"
+        job: "/sbin/shutdown -r now"
+        user: root
