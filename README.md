@@ -9,6 +9,7 @@ This repository contains an Ansible playbook to automate the deployment of a ful
 - **Service Management**: Installs dependencies and deploys the full-stack application.
 - **Docker Support**: Manages containers for backend, frontend, and database services.
 - **CI/CD Integration**: Uses GitHub Actions to automate deployment.
+- **Cloudflare Integration**: Automatically updates DNS records via Cloudflare API during deployment.
 
 ## Prerequisites
 - Oracle Cloud Infrastructure (OCI) account with a free-tier instance.
