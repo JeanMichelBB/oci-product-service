@@ -3,6 +3,30 @@
   become: true  # Run as root
 
   tasks:
+    - name: Create a swap file
+      command: fallocate -l 1G /swapfile
+      args:
+        creates: /swapfile
+
+    - name: Set permissions on the swap file
+      file:
+        path: /swapfile
+        mode: '0600'
+
+    - name: Format the swap file
+      command: mkswap /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Enable the swap file
+      command: swapon /swapfile
+      when: ansible_swaptotal_mb == 0
+
+    - name: Persist the swap file in fstab
+      lineinfile:
+        dest: /etc/fstab
+        line: '/swapfile none swap sw 0 0'
+        state: present
+
     - name: Add Docker GPG key
       apt_key:
         url: https://download.docker.com/linux/ubuntu/gpg
