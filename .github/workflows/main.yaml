@@ -1,11 +1,11 @@
-name: Deploy React App to OCI
+name: Deploy k3s Cluster to OCI
 
 on:
   push:
     branches:
       - main
     paths:
-      - ansible/*
+      - ansible/**
 
 jobs:
   deploy:
@@ -39,75 +39,101 @@ jobs:
           chmod 600 ~/.oci/config
           echo "Config file created at ~/.oci/config"
 
-      - name: Check if the instance is running
+      - name: Get public IPs of all running instances
         run: |
-          instance_state=$(oci compute instance list \
-          --compartment-id  ${{ secrets.OCI_COMPARTMENT_ID }} \
-          --query "data[?\"lifecycle-state\"=='RUNNING'] | sort_by(@, &\"time-created\") | [-1].\"lifecycle-state\"" \
-          --output json | jq -r '.')
-
-          while [ "$instance_state" != "RUNNING" ]; do
-          sleep 10
-          
-          instance_state=$(oci compute instance list \
-              --compartment-id  ${{ secrets.OCI_COMPARTMENT_ID }} \
-              --query "data[?\"lifecycle-state\"=='RUNNING'] | sort_by(@, &\"time-created\") | [-1].\"lifecycle-state\"" \
-              --output json | jq -r '.')
+          > ansible/hosts.tmp
+          oci compute instance list \
+            --compartment-id ${{ secrets.OCI_COMPARTMENT_ID }} \
+            --all \
+            --query "data[?\"lifecycle-state\"=='RUNNING'].id" \
+            --raw-output | jq -r '.[]' | while read -r ID; do
+              oci compute vnic-attachment list \
+                --compartment-id ${{ secrets.OCI_COMPARTMENT_ID }} \
+                --instance-id $ID \
+                --query "data[].\"vnic-id\"" --raw-output | jq -r '.[]' | while read -r VNIC_ID; do
+                  IP=$(oci network vnic get --vnic-id $VNIC_ID \
+                    --query "data.\"public-ip\"" --raw-output)
+                  echo "$IP" >> ansible/hosts.tmp
+              done
           done
+          cat ansible/hosts.tmp
 
-      - name: Get the public IP of the instance
+      - name: Update Ansible inventory with worker IPs
         run: |
-          PUBLIC_IP=$(oci compute instance list --compartment-id ${{ secrets.OCI_COMPARTMENT_ID }} --sort-by TIMECREATED --all --query "data[0].id" --raw-output | xargs -I {} oci compute instance list-vnics --instance-id {} --query "data[0].\"public-ip\"" --raw-output)
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          # Remove old worker IPs in inventory.ini (except the master)
+          sed -i.bak '/^\[workers\]/,/^\[/{//!d}' ansible/inventory.ini
 
-      - name: Update Cloudflare DNS Record (Optimized)
+          # Append header if missing
+          if ! grep -q '^\[workers\]' ansible/inventory.ini; then
+            echo '[workers]' >> ansible/inventory.ini
+          fi
+
+          # Add new worker IPs from hosts.tmp
+          while read -r IP; do
+            echo "$IP ansible_ssh_user=ubuntu ansible_ssh_private_key_file=~/.ssh/sacenplastique.key" >> ansible/inventory.ini
+          done < ansible/hosts.tmp
+
+      - name: Update Cloudflare DNS Record (first instance only)
         run: |
+          FIRST_IP=$(head -n1 ansible/hosts.tmp)
           EXISTING_IP=$(curl -s -X GET \
             "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/dns_records/${{ secrets.RECORD_ID }}" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" | jq -r '.result.content')
 
-          if [ "$EXISTING_IP" != "${{ env.PUBLIC_IP }}" ]; then
+          if [ "$EXISTING_IP" != "$FIRST_IP" ]; then
             curl -X PATCH "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/dns_records/${{ secrets.RECORD_ID }}" \
               -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
               -H "Content-Type: application/json" \
-              --data '{"content": "'${{ env.PUBLIC_IP }}'", "type": "A"}'
+              --data '{"content": "'$FIRST_IP'", "type": "A"}'
           else
             echo "Cloudflare DNS record is already up to date."
           fi
 
-      - name: Create Ansible Inventory
+      - name: Generate Ansible inventory
         run: |
-          if [ -z "${{ env.PUBLIC_IP }}" ]; then
-            echo "Error: PUBLIC_IP is empty"
-            exit 1
-          fi
-          cp ansible/inventory_template.ini ansible/inventory.ini
-          sed -i "s/__PUBLIC_IP__/${{ env.PUBLIC_IP }}/g" ansible/inventory.ini
+          python3 - <<'EOF'
+          with open("ansible/hosts.tmp") as f:
+              ips = [line.strip() for line in f if line.strip()]
+
+          worker_lines = "\n".join(
+              f"{ip} ansible_ssh_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa"
+              for ip in ips
+          )
+
+          with open("ansible/inventory_template.ini") as f:
+              template = f.read()
+
+          inventory = template.replace("__OCI_WORKERS__", worker_lines)
+
+          with open("ansible/inventory.ini", "w") as f:
+              f.write(inventory)
+
+          print(inventory)
+          EOF
 
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ env.PUBLIC_IP }}" >> ~/.ssh/known_hosts
+          echo "${{ secrets.MASTER_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519_elitedesk
+          chmod 600 ~/.ssh/id_ed25519_elitedesk
+          ssh-keyscan -p 22 -H sacenpapier.org >> ~/.ssh/known_hosts
+          for IP in $(cat ansible/hosts.tmp); do
+            ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts
+          done
 
-      - name: Import .env file
-        run: |
-          echo "${{ secrets.ENV_FILE }}" > ansible/.env
-
-      - name: Cache Ansible
-        id: cache-ansible
-        uses: actions/cache@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: /usr/local/bin/ansible
-          key: ansible-${{ runner.os }}-${{ runner.arch }}
-          
-      - name: Install Ansible (If Not Cached)
-        if: steps.cache-ansible.outputs.cache-hit != 'true'
-        run: |
-          sudo apt update && sudo apt install -y ansible
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Ansible
+        run: pip install ansible
 
       - name: Run Ansible Playbook
         run: |
-          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
+          ansible-playbook -i ansible/inventory.ini ansible/playbook.yml \
+            --extra-vars "tailscale_auth_key=${{ secrets.TAILSCALE_AUTH_KEY }}"

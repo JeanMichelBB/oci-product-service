@@ -1,170 +1,171 @@
-- name: Deploy Chatbox Docker Containers to OCI
-  hosts: oci
+---
+# Play 1 — System prerequisites
+- name: System prerequisites
+  hosts: k3s
   become: true
 
   tasks:
-    - name: Create a swap file
-      command: fallocate -l 1G /swapfile
-      args:
-        creates: /swapfile
-
-    - name: Set permissions on the swap file
-      file:
-        path: /swapfile
-        mode: '0600'
-
-    - name: Format the swap file
-      command: mkswap /swapfile
-      when: ansible_swaptotal_mb == 0
-
-    - name: Enable the swap file
-      command: swapon /swapfile
-      when: ansible_swaptotal_mb == 0
-
-    - name: Persist the swap file in fstab
-      lineinfile:
-        dest: /etc/fstab
-        line: '/swapfile none swap sw 0 0'
-        state: present
-
-    - name: Add Docker GPG key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
-
-    - name: Add Docker repository
-      apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-        state: present
-    
-    - name: Stop and remove mysql container if running
-      docker_container:
-        name: mysql
-        state: absent
-
-    - name: Stop and remove frontend container if running
-      docker_container:
-        name: frontend
-        state: absent
-
-    - name: Stop and remove backend container if running
-      docker_container:
-        name: backend
-        state: absent
-
-    - name: Ensure Docker and cron are installed
+    - name: Install required packages
       apt:
         update_cache: yes
         name:
-          - apt-transport-https
-          - ca-certificates
           - curl
           - gnupg
-          - lsb-release
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - cron
+          - apt-transport-https
+          - iptables
         state: present
 
-    - name: Ensure Docker service is started
-      service:
-        name: docker
-        state: started
-        enabled: yes
+    - name: Load br_netfilter module
+      modprobe:
+        name: br_netfilter
+        state: present
 
-    - name: Ensure target directory exists
-      file:
-        path: /opt/chatbox
-        state: directory
-        owner: ubuntu
-        group: ubuntu
-        mode: '0755'
+    - name: Load overlay module
+      modprobe:
+        name: overlay
+        state: present
 
-    - name: Copy .env file to target machine
+    - name: Persist kernel modules for k3s
       copy:
-        src: .env
-        dest: /opt/chatbox/.env
-        owner: ubuntu
-        group: ubuntu
-        mode: "0644"
+        dest: /etc/modules-load.d/k3s.conf
+        content: |
+          br_netfilter
+          overlay
 
-    - name: Ensure Docker network exists
-      docker_network:
-        name: my_network
+    - name: Configure sysctl for k3s networking
+      copy:
+        dest: /etc/sysctl.d/99-k3s.conf
+        content: |
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+
+    - name: Apply sysctl settings
+      command: sysctl --system
+
+
+# Play 2 — Tailscale
+- name: Install and connect Tailscale
+  hosts: k3s
+  become: true
+
+  tasks:
+    - name: Add Tailscale GPG key
+      apt_key:
+        url: https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.gpg
+        keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg
         state: present
 
-    - name: Ensure Docker volume exists
-      docker_volume:
-        name: db_data
+    - name: Add Tailscale apt repository
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main"
+        filename: tailscale
         state: present
 
-    - name: "Launch MySQL container"
-      docker_container:
-        name: mysql
-        image: mysql:8
-        restart_policy: always
-        env:
-          MYSQL_ROOT_PASSWORD: "sysadmsysadm"
-          MYSQL_DATABASE: "chatbox_db"
-          MYSQL_USER: "user"
-          MYSQL_PASSWORD: "sysadm"
-        volumes:
-          - db_data:/var/lib/mysql:rw
-        networks:
-          - name: my_network
-        memory: "512m"
-        cpus: "0.5"
+    - name: Install Tailscale
+      apt:
+        update_cache: yes
+        name: tailscale
+        state: present
 
-    - name: "Launch Backend container with latest image"
-      docker_container:
-        name: backend
-        image: jeanmichelbb/oci-backend:latest
-        pull: always
-        restart_policy: always
-        env_file: /opt/chatbox/.env
-        ports:
-          - "8000:8000"
-        networks:
-          - name: my_network
-        memory: "128m"
-        cpus: "0.3"
-
-    - name: "Launch Frontend container with latest image"
-      docker_container:
-        name: frontend
-        image: jeanmichelbb/oci-frontend:latest
-        pull: always
-        restart_policy: always
-        ports:
-          - "80:80"
-        networks:
-          - name: my_network
-        memory: "64m"
-        cpus: "0.2"
-
-    - name: create service docker-update.service
-      template:
-        src: templates/docker-update.service.j2
-        dest: /etc/systemd/system/docker-update.service
-        owner: root
-        group: root        
-        mode: '0644'
-
-    - name: reload systemd to recognize the new service
-      systemd:
-        daemon_reload: yes 
-
-    - name: start docker-update service
-      systemd:
-        name: docker-update.service
+    - name: Enable and start tailscaled
+      service:
+        name: tailscaled
         state: started
         enabled: yes
 
-    - name: Schedule instance reboot at 8 AM and 5 PM daily
-      cron:
-        name: "Reboot instance twice daily"
-        minute: "0"
-        hour: "8,17"
-        job: "/sbin/shutdown -r now"
-        user: root
+    - name: Check Tailscale connection status
+      command: tailscale status --json
+      register: tailscale_status_raw
+      changed_when: false
+
+    - name: Parse Tailscale backend state
+      set_fact:
+        tailscale_connected: "{{ (tailscale_status_raw.stdout | from_json).BackendState == 'Running' }}"
+
+    - name: Connect to Tailscale network
+      command: >
+        tailscale up
+        --authkey={{ tailscale_auth_key }}
+        --accept-routes
+      when: not tailscale_connected
+
+
+# Play 3 — k3s server (master)
+- name: Install k3s server on master
+  hosts: master
+  become: true
+
+  tasks:
+    - name: Get Tailscale IPv4 address
+      command: tailscale ip --4
+      register: tailscale_ip_result
+      changed_when: false
+
+    - name: Set master Tailscale IP fact
+      set_fact:
+        k3s_master_tailscale_ip: "{{ tailscale_ip_result.stdout | trim }}"
+
+    - name: Check if k3s is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s server
+      shell: >
+        curl -sfL https://get.k3s.io | sh -s - server
+        --tls-san {{ k3s_master_tailscale_ip }}
+        --node-ip {{ k3s_master_tailscale_ip }}
+        --advertise-address {{ k3s_master_tailscale_ip }}
+        --flannel-iface tailscale0
+      when: not k3s_binary.stat.exists
+
+    - name: Ensure k3s service is started and enabled
+      service:
+        name: k3s
+        state: started
+        enabled: yes
+
+    - name: Wait for node token to be available
+      wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+
+    - name: Read node token
+      slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_token_raw
+
+    - name: Set k3s token and master IP as facts
+      set_fact:
+        k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
+        k3s_master_ip: "{{ k3s_master_tailscale_ip }}"
+
+
+# Play 4 — k3s agents (workers)
+- name: Install k3s agents on workers
+  hosts: workers
+  become: true
+
+  tasks:
+    - name: Resolve master IP and token from hostvars
+      set_fact:
+        master_ip: "{{ hostvars[groups['master'][0]]['k3s_master_ip'] }}"
+        master_token: "{{ hostvars[groups['master'][0]]['k3s_token'] }}"
+
+    - name: Check if k3s is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s agent
+      shell: curl -sfL https://get.k3s.io | sh -s - agent
+      environment:
+        K3S_URL: "https://{{ master_ip }}:6443"
+        K3S_TOKEN: "{{ master_token }}"
+      when: not k3s_binary.stat.exists
+
+    - name: Ensure k3s-agent service is started and enabled
+      service:
+        name: k3s-agent
+        state: started
+        enabled: yes
