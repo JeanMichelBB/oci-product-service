@@ -131,7 +131,7 @@ jobs:
           cache: pip
 
       - name: Install Ansible
-        run: pip install ansible
+        run: pip install -r requirements.txt
 
       - name: Run Ansible Playbook
         run: |
