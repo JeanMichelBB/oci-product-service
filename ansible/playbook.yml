@@ -90,6 +90,12 @@
         --accept-routes
       when: not tailscale_connected
 
+    - name: Advertise routes for Oracle subnet and metadata
+      command: >
+        tailscale set
+        --advertise-routes=10.0.0.0/24,169.254.169.254/32
+        --accept-dns=false
+      when: tailscale_connected
 
 # Play 3 — k3s server (master)
 - name: Install k3s server on master
