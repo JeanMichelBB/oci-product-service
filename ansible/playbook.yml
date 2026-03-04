@@ -43,6 +43,13 @@
     - name: Apply sysctl settings
       command: sysctl --system
 
+    - name: Install ufw
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+      become: true
+
     - name: Disable ufw
       command: ufw disable
       become: true
