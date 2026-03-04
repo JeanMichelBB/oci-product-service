@@ -43,59 +43,10 @@
     - name: Apply sysctl settings
       command: sysctl --system
 
+    - name: Disable ufw
+      command: ufw disable
+      become: true
 
-# Play 2 — Tailscale
-- name: Install and connect Tailscale
-  hosts: k3s
-  become: true
-
-  tasks:
-    - name: Add Tailscale GPG key
-      apt_key:
-        url: https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.gpg
-        keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg
-        state: present
-
-    - name: Add Tailscale apt repository
-      apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main"
-        filename: tailscale
-        state: present
-
-    - name: Install Tailscale
-      apt:
-        update_cache: yes
-        name: tailscale
-        state: present
-
-    - name: Enable and start tailscaled
-      service:
-        name: tailscaled
-        state: started
-        enabled: yes
-
-    - name: Check Tailscale connection status
-      command: tailscale status --json
-      register: tailscale_status_raw
-      changed_when: false
-
-    - name: Parse Tailscale backend state
-      set_fact:
-        tailscale_connected: "{{ (tailscale_status_raw.stdout | from_json).BackendState == 'Running' }}"
-
-    - name: Connect to Tailscale network
-      command: >
-        tailscale up
-        --authkey={{ tailscale_auth_key }}
-        --accept-routes
-      when: not tailscale_connected
-
-    - name: Advertise routes for Oracle subnet and metadata
-      command: >
-        tailscale set
-        --advertise-routes=10.0.0.0/24,169.254.169.254/32
-        --accept-dns=false
-      when: tailscale_connected
 
 # Play 3 — k3s server (master)
 - name: Install k3s server on master
@@ -103,27 +54,13 @@
   become: true
 
   tasks:
-    - name: Get Tailscale IPv4 address
-      command: tailscale ip --4
-      register: tailscale_ip_result
-      changed_when: false
-
-    - name: Set master Tailscale IP fact
-      set_fact:
-        k3s_master_tailscale_ip: "{{ tailscale_ip_result.stdout | trim }}"
-
     - name: Check if k3s is already installed
       stat:
         path: /usr/local/bin/k3s
       register: k3s_binary
 
     - name: Install k3s server
-      shell: >
-        curl -sfL https://get.k3s.io | sh -s - server
-        --tls-san {{ k3s_master_tailscale_ip }}
-        --node-ip {{ k3s_master_tailscale_ip }}
-        --advertise-address {{ k3s_master_tailscale_ip }}
-        --flannel-iface tailscale0
+      shell: curl -sfL https://get.k3s.io | sh -s - server
       when: not k3s_binary.stat.exists
 
     - name: Ensure k3s service is started and enabled
@@ -141,10 +78,9 @@
         src: /var/lib/rancher/k3s/server/node-token
       register: k3s_token_raw
 
-    - name: Set k3s token and master IP as facts
+    - name: Set k3s token as fact
       set_fact:
         k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
-        k3s_master_ip: "{{ k3s_master_tailscale_ip }}"
 
 
 # Play 4 — k3s agents (workers)
@@ -155,7 +91,7 @@
   tasks:
     - name: Resolve master IP and token from hostvars
       set_fact:
-        master_ip: "{{ hostvars[groups['master'][0]]['k3s_master_ip'] }}"
+        master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] | default(hostvars[groups['master'][0]]['inventory_hostname']) }}"
         master_token: "{{ hostvars[groups['master'][0]]['k3s_token'] }}"
 
     - name: Check if k3s is already installed
