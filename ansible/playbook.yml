@@ -48,14 +48,67 @@
         name: ufw
         state: present
         update_cache: yes
-      become: true
 
     - name: Disable ufw
       command: ufw disable
-      become: true
 
 
-# Play 3 — k3s server (master)
+# Play 2 — Install Tailscale on all nodes
+- name: Install and configure Tailscale
+  hosts: k3s
+  become: true
+
+  tasks:
+    - name: Check if Tailscale is already installed
+      stat:
+        path: /usr/bin/tailscale
+      register: tailscale_binary
+
+    - name: Download and run Tailscale install script
+      shell: curl -fsSL https://tailscale.com/install.sh | sh
+      when: not tailscale_binary.stat.exists
+
+    - name: Ensure Tailscale service is started and enabled
+      service:
+        name: tailscaled
+        state: started
+        enabled: yes
+
+    - name: Check if already authenticated to Tailscale
+      command: tailscale status --json
+      register: tailscale_status
+      changed_when: false
+      failed_when: false
+
+    - name: Authenticate to Tailscale using auth key
+      command: >
+        tailscale up
+        --authkey={{ tailscale_auth_key }}
+        --accept-routes
+        --accept-dns=false
+        --hostname={{ inventory_hostname }}
+      when: >
+        tailscale_auth_key is defined and
+        (tailscale_status.rc != 0 or
+        'NeedsLogin' in tailscale_status.stdout)
+
+    - name: Wait for Tailscale to get an IP
+      shell: tailscale ip -4
+      register: tailscale_ip_result
+      retries: 10
+      delay: 5
+      until: tailscale_ip_result.rc == 0 and tailscale_ip_result.stdout != ""
+
+    - name: Set Tailscale IP as host fact
+      set_fact:
+        tailscale_ip: "{{ tailscale_ip_result.stdout | trim }}"
+
+    - name: Show Tailscale IP for this node
+      debug:
+        msg: "{{ inventory_hostname }} Tailscale IP: {{ tailscale_ip }}"
+
+
+# Play 3 — k3s server (master) using Tailscale IP
 - name: Install k3s server on master
   hosts: master
   become: true
@@ -66,8 +119,14 @@
         path: /usr/local/bin/k3s
       register: k3s_binary
 
-    - name: Install k3s server
-      shell: curl -sfL https://get.k3s.io | sh -s - server
+    - name: Install k3s server bound to Tailscale IP
+      shell: >
+        curl -sfL https://get.k3s.io | sh -s - server
+        --node-ip={{ tailscale_ip }}
+        --advertise-address={{ tailscale_ip }}
+        --flannel-iface=tailscale0
+        --tls-san={{ tailscale_ip }}
+        --tls-san=sacenpapier.org
       when: not k3s_binary.stat.exists
 
     - name: Ensure k3s service is started and enabled
@@ -89,16 +148,36 @@
       set_fact:
         k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
 
+    - name: Wait for k3s API to be ready
+      wait_for:
+        host: "{{ tailscale_ip }}"
+        port: 6443
+        timeout: 60
 
-# Play 4 — k3s agents (workers)
+    - name: Fetch kubeconfig from master
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ./kubeconfig-raw.yaml
+        flat: yes
+
+    - name: Replace localhost with Tailscale IP in kubeconfig
+      delegate_to: localhost
+      become: false
+      replace:
+        path: ./kubeconfig-raw.yaml
+        regexp: 'https://127\.0\.0\.1:6443'
+        replace: "https://{{ tailscale_ip }}:6443"
+
+
+# Play 4 — k3s agents (workers) using Tailscale IP
 - name: Install k3s agents on workers
   hosts: workers
   become: true
 
   tasks:
-    - name: Resolve master IP and token from hostvars
+    - name: Resolve master Tailscale IP and token from hostvars
       set_fact:
-        master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] | default(hostvars[groups['master'][0]]['inventory_hostname']) }}"
+        master_tailscale_ip: "{{ hostvars[groups['master'][0]]['tailscale_ip'] }}"
         master_token: "{{ hostvars[groups['master'][0]]['k3s_token'] }}"
 
     - name: Check if k3s is already installed
@@ -106,10 +185,13 @@
         path: /usr/local/bin/k3s
       register: k3s_binary
 
-    - name: Install k3s agent
-      shell: curl -sfL https://get.k3s.io | sh -s - agent
+    - name: Install k3s agent bound to Tailscale IP
+      shell: >
+        curl -sfL https://get.k3s.io | sh -s - agent
+        --node-ip={{ tailscale_ip }}
+        --flannel-iface=tailscale0
       environment:
-        K3S_URL: "https://{{ master_ip }}:6443"
+        K3S_URL: "https://{{ master_tailscale_ip }}:6443"
         K3S_TOKEN: "{{ master_token }}"
       when: not k3s_binary.stat.exists
 
@@ -118,3 +200,11 @@
         name: k3s-agent
         state: started
         enabled: yes
+
+    - name: Wait for agent to register with master
+      pause:
+        seconds: 15
+
+    - name: Show worker Tailscale IP
+      debug:
+        msg: "Worker {{ inventory_hostname }} joined via Tailscale IP {{ tailscale_ip }}"
